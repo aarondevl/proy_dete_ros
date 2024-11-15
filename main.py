@@ -1,68 +1,116 @@
+import os
+import logging
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
+
 import cv2
-import time
 import numpy as np
 import mss
 from src.emotion_recognition import predict_emotion
-from src.face_recognition_utils import load_known_faces, recognize_face
-from src.visualization import update_plot, save_final_plot, save_session_summary_to_csv, save_session_to_astra, emotion_counts, save_session_to_api
+from src.visualization import (
+    record_emotion, 
+    create_session_directory, 
+    save_session_summary,
+    save_session_to_astra
+)
+import time
 
-# Configuración de captura de pantalla completa
+# Configuración
 sct = mss.mss()
-monitor = sct.monitors[2]  # Monitor principal, cambiar a sct.monitors[2] si usas más monitores
+monitor = sct.monitors[2]
 frame_count = 0
-frame_skip = 30  # Procesar solo cada 30 fotogramas
-plot_update_interval = 30
+frame_skip = 15
+running = True
 
-# Cargar caras conocidas
-load_known_faces()
+# Cargar el clasificador de cascada
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-person_name = "Desconocido"
+if face_cascade.empty():
+    raise Exception("Error al cargar el clasificador de cascada")
 
-while True:
-    # Capturar toda la pantalla
-    screenshot = sct.grab(monitor)
-    frame = np.array(screenshot)
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)  # Convertir de BGRA a BGR para usarlo con OpenCV
+print("=== Sistema de Detección de Emociones ===")
+print("Iniciando captura de video...")
+print("Presiona 'q' para finalizar la sesión")
+print("=======================================")
 
-    frame_count += 1
-    if frame_count % frame_skip == 0:
-        # Reducir la resolución de la imagen para acelerar el procesamiento
-        small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-        rgb_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+# Crear directorio de sesión
+session_dir, faces_dir, plots_dir = create_session_directory()
+print(f"Sesión iniciada: {os.path.basename(session_dir)}")
 
-        # Reconocer rostros en la imagen capturada
-        recognized_faces = recognize_face(rgb_frame)
+try:
+    while running:
+        try:
+            # Capturar pantalla
+            screenshot = sct.grab(monitor)
+            frame = np.array(screenshot)
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
 
-        for (top, right, bottom, left, name) in recognized_faces:
-            person_name = name  # Guardar el nombre de la persona reconocida
-            # Ajustar las coordenadas al tamaño original
-            top, right, bottom, left = top * 2, right * 2, bottom * 2, left * 2
-            roi_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)[top:bottom, left:right]
-            roi_gray = cv2.resize(roi_gray, (48, 48))
+            frame_count += 1
+            if frame_count % frame_skip == 0:
+                # Detectar rostros
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                gray = cv2.equalizeHist(gray)
+                
+                faces = face_cascade.detectMultiScale(
+                    gray,
+                    scaleFactor=1.05,
+                    minNeighbors=4,
+                    minSize=(30, 30),
+                    flags=cv2.CASCADE_SCALE_IMAGE
+                )
 
-            predicted_emotion = predict_emotion(roi_gray)
-            emotion_counts[predicted_emotion] += 1
+                # Procesar cada rostro
+                for (x, y, w, h) in faces:
+                    try:
+                        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                        roi_gray = gray[y:y+h, x:x+w]
+                        
+                        if roi_gray.size > 0:
+                            roi_gray = cv2.resize(roi_gray, (48, 48))
+                            predicted_emotion = predict_emotion(roi_gray)
+                            
+                            # Registrar emoción
+                            person_id = record_emotion(frame, x, y, w, h, predicted_emotion, faces_dir)
+                            
+                            if person_id:
+                                # Mostrar información en pantalla
+                                text = f"{person_id}: {predicted_emotion}"
+                                cv2.putText(frame, text, 
+                                          (x, y-10), 
+                                          cv2.FONT_HERSHEY_SIMPLEX, 
+                                          0.9, (0, 255, 0), 2)
+                                
+                    except Exception as e:
+                        print(f"Error al procesar un rostro: {e}")
+                        continue
 
-            # Dibujar el rectángulo y poner la etiqueta en la pantalla capturada
-            cv2.rectangle(frame, (left, top), (right, bottom), (255, 255, 255), 2)
-            cv2.putText(frame, f'{name} - {predicted_emotion}', (left, top - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            # Mostrar frame
+            cv2.imshow('Detección de Emociones', frame)
 
-    # Mostrar la pantalla con los rostros reconocidos
-    cv2.imshow('Emotion and Face Recognition on Screen', frame)
+            # Verificar tecla de salida
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                print("\nFinalizando sesión...")
+                running = False
 
-    # Actualizar el gráfico cada cierto intervalo de fotogramas
-    if frame_count % plot_update_interval == 0:
-        update_plot()
+        except Exception as e:
+            print(f"Error en el bucle principal: {e}")
+            time.sleep(1)  # Pausa para evitar bucle infinito de errores
+            continue
 
-    # Salir si se presiona 'q'
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-# Guardar el gráfico, el resumen de la sesión en CSV, y enviar a Astra
-save_final_plot(person_name)
-save_session_summary_to_csv(person_name)
-save_session_to_astra(person_name)
-save_session_to_api(person_name)
-
-cv2.destroyAllWindows()
+except KeyboardInterrupt:
+    print("\nDetección interrumpida por el usuario")
+except Exception as e:
+    print(f"\nError inesperado: {e}")
+finally:
+    print("\nGuardando datos de la sesión...")
+    try:
+        save_session_summary(session_dir, faces_dir, plots_dir)
+        save_session_to_astra("Reunión")
+        print(f"Datos guardados en: {session_dir}")
+    except Exception as e:
+        print(f"Error al guardar los datos: {e}")
+    
+    print("Cerrando ventanas...")
+    cv2.destroyAllWindows()
+    print("Sesión finalizada")

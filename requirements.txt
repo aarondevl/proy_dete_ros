@@ -1,12 +1,12 @@
-tensorflow
-opencv-python  # o opencv-python-headless si no necesitas mostrar video
-numpy
-matplotlib
-pillow
+tensorflow>=2.5.0
+opencv-python>=4.5.0
+numpy>=1.19.0
+matplotlib>=3.3.0
+pillow>=8.0.0
 cmake  # Necesario solo para compilar dlib
 #dblib
 #https://github.com/z-mahmud22/Dlib_Windows_Python3.x
-face-recognition
-astrapy
-mss 
+face-recognition>=1.3.0
+astrapy>=0.3.0
+mss>=6.1.0
 
