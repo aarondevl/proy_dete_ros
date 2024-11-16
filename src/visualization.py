@@ -43,8 +43,14 @@ def get_person_id(frame, x, y, w, h, faces_dir):
     """
     global last_person_id
     
+    # Extraer la región de la cara
     face_image = frame[y:y+h, x:x+w]
-    face_encoding = face_recognition.face_encodings(face_image)
+    
+    # Convertir a RGB (face_recognition requiere RGB)
+    rgb_face = cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB)
+    
+    # Obtener encoding
+    face_encoding = face_recognition.face_encodings(rgb_face)
     
     if len(face_encoding) == 0:
         return None

@@ -40,7 +40,7 @@ print(f"Sesión iniciada: {os.path.basename(session_dir)}")
 try:
     while running:
         try:
-            # Capturar pantalla
+            # Capturar pantalla y convertir correctamente
             screenshot = sct.grab(monitor)
             frame = np.array(screenshot)
             frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
